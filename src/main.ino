@@ -12,6 +12,7 @@ int CE_pin = 7;
 int CSN_pin = 8;
 
 const uint64_t address = 0xF0F0F0F0E1LL;
+HardwareSerial& RCibus = Serial1;
 
 struct Mydata
 {
@@ -29,6 +30,8 @@ void setup()
   RF_setup(address, "Tx");
   pinMode(RA_pin, INPUT);
   radioactive_setup(RA_pin);
+  ibusRC_setup(RCibus);
+
 }
 
 void loop()
