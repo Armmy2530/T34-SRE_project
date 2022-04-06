@@ -26,7 +26,10 @@ float kp_motor = 0.17;
 float kd_motor = 0.1;
 float current_L = 0, pev_L = 0, target_L = 0;
 float current_R = 0, pev_R = 0, target_R = 0;
-int current_time =0, pev_motor = 0, offset_motor = 50;
+int current_time = 0, pev_motor = 0, offset_motor = 50;
+
+boolean first_print = true;
+float freerange = 5; //percentage freerange
 
 const uint64_t address = 0xF0F0F0F0E1LL;
 HardwareSerial &RCibus = Serial1;
@@ -66,26 +69,31 @@ void setup()
   radioactive_setup(RA_pin);
   ibusRC_setup(RCibus);
   remote_getdata();
+  init_setup();
 }
 
 void loop()
 {
   current_time = millis();
   voltage = 20;
-  RA = radioactive_getdata();
-  remote_getdata();
+  sensor_update();
   Serial_test();
   nRF_send();
   Robot_mode();
   delay(10);
 }
 
+void sensor_update(){
+  RA = radioactive_getdata();
+  remote_getdata();
+}
+
 void remote_getdata()
 {
-  controller_data.L_X = readChannel(3, -255, 255, 0);
-  controller_data.L_Y = readChannel(2, -255, 255, 0);
-  controller_data.R_X = readChannel(0, -255, 255, 0);
-  controller_data.R_Y = readChannel(1, -255, 255, 0);
+  controller_data.L_X = readChannel_freerange(3, -255, 255, 0,freerange);
+  controller_data.L_Y = readChannel_freerange(2, -255, 255, 0,freerange);
+  controller_data.R_X = readChannel_freerange(0, -255, 255, 0,freerange);
+  controller_data.R_Y = readChannel_freerange(1, -255, 255, 0,freerange);
   controller_data.SWA = redSwitch(4, false);
   controller_data.SWB = redSwitch(5, false);
   controller_data.SWC = readChannel(6, 0, 2, 0);
@@ -98,36 +106,36 @@ void Robot_mode()
 {
   if (current_time - pev_motor >= offset_motor)
   {
-  if (controller_data.SWB)
-  { // drive mode
-    if (controller_data.SWD)
-    { // smooth mode
-      current_L = pd_sum(kp_motor, kd_motor, (float(controller_data.L_Y) - current_L), pev_L, current_L);
-      current_R = pd_sum(kp_motor, kd_motor, (float(controller_data.R_Y) - current_R), pev_R, current_R);
-      pev_L = (float(controller_data.L_Y) - current_L);
-      pev_R = (float(controller_data.R_Y) - current_R);
-      M_R.setSpeed(round(current_L));
-      M_L.setSpeed(round(current_R));
+    if (controller_data.SWB)
+    { // drive mode
+      if (controller_data.SWD)
+      { // smooth mode
+        current_L = pd_sum(kp_motor, kd_motor, (float(controller_data.L_Y) - current_L), pev_L, current_L);
+        current_R = pd_sum(kp_motor, kd_motor, (float(controller_data.R_Y) - current_R), pev_R, current_R);
+        pev_L = (float(controller_data.L_Y) - current_L);
+        pev_R = (float(controller_data.R_Y) - current_R);
+        M_R.setSpeed(round(current_L));
+        M_L.setSpeed(round(current_R));
+      }
+      else
+      {
+        current_L = controller_data.L_Y;
+        current_R = controller_data.R_Y;
+        pev_L = current_L;
+        pev_R = current_R;
+        M_R.setSpeed(round(controller_data.L_Y));
+        M_L.setSpeed(round(controller_data.R_Y));
+      }
+      Serial.print("TargetL:");
+      Serial.print(round(controller_data.L_Y));
+      Serial.print(" CurrentL:");
+      Serial.print(round(current_L));
+      Serial.print(" TargetR:");
+      Serial.print(round(controller_data.R_Y));
+      Serial.print(" CurrentR:");
+      Serial.println(round(current_R));
     }
-    else
-    {
-      current_L = controller_data.L_Y;
-      current_R = controller_data.R_Y;
-      pev_L = current_L;
-      pev_R = current_R;
-      M_R.setSpeed(round(controller_data.L_Y));
-      M_L.setSpeed(round(controller_data.R_Y));
-    }
-    Serial.print("TargetL:");
-    Serial.print(round(controller_data.L_Y));
-    Serial.print(" CurrentL:");
-    Serial.print(round(current_L));
-    Serial.print(" TargetR:");
-    Serial.print(round(controller_data.R_Y));
-    Serial.print(" CurrentR:");
-    Serial.println(round(current_R));
-  }
-  pev_motor = millis();
+    pev_motor = millis();
   }
   else
   {
@@ -144,6 +152,20 @@ void nRF_send()
   {
     radio.write(&data, sizeof(Mydata));
   }
+}
+
+void init_setup()
+{
+  while(not(controller_data.SWB) || controller_data.L_Y != 0 || controller_data.R_Y != 0){
+    if (first_print)
+    {
+      Serial.println("please set rc_controller button and throttle");
+      first_print = false;
+    }
+    RA = radioactive_getdata();
+    remote_getdata();
+  }
+  first_print = true;
 }
 
 void Serial_test()
