@@ -4,7 +4,7 @@ IBusBM ibusRc;
 
 void ibusRC_setup(HardwareSerial& ibusRcSerial)
 {
-  ibusRc.begin(ibusRcSerial);
+  ibusRc.begin(ibusRcSerial, IBUSBM_NOTIMER);
 }
 
 // Read the number of a given channel and convert to the range provided.
@@ -68,4 +68,8 @@ int readChannel_freerange(byte channelInput, int minLimit, int maxLimit, int def
   }
   // Serial.println("False");
   return map(ch, 1000, 2000, minLimit, maxLimit);
+}
+
+void ibus_loop(){
+  ibusRc.loop(); 
 }
