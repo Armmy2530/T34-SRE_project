@@ -28,7 +28,7 @@ int connection = 1;
 #define B2_pin 9
 
 // servo motor
-#define Servo_1 2
+#define Servo_1 13
 #define Servo_2 4
 #define Servo_3 5
 #define Servo_4 6
@@ -40,17 +40,25 @@ float current_L = 0, pev_L = 0, target_L = 0;
 float current_R = 0, pev_R = 0, target_R = 0;
 
 // parameter servo
-float servo1_target = 170, servo1_current = 170, servo1_offset = 54;
-float servo2_target = 20, servo2_current = 20, servo2_offset = 6;
+float servo1_target = 160, servo1_current = 0, servo1_offset = 54;
+float servo2_target = 44, servo2_current = 0, servo2_offset = 6;
+float servo3_target = 1500;
+float grip_target = 180, grip_current = 0;
+int min_grip = 120, max_grip = 180, close_grip = 90;
+
+// object codinate
+int pev_arm_mode = 0;
+float check_pos[] = {10.5, 2.2, 0};
+float home_pos[] = {5.5, 3.8, 0};
 
 // IK robot arm math
-float x = 7, y = 2, pev_x = 0, pev_y = 0;
-float x_in = 0, y_in = 0;
+float x = 6, y = 4, pev_x = 6, pev_y = 4;
+float x_in = 6, y_in = 4;
 float a1 = 12, a2 = 12;
-float theta_1 = 0, theta_2 = 0, theta_3 = 0, theta_4 = 0;
+float theta_1 = -38, theta_2 = 145, theta_3 = 106, theta_4 = -145;
 
 // time loop
-int current_time = 0, pev_time = 0, offset_time = 50000;
+int current_time = 0, pev_time = 0, offset_time = 5000;
 int current_arm_t = 0, pev_arm_t = 0, offset_arm_t = 100000;
 
 // drive mode 2 setting
@@ -118,16 +126,38 @@ RF24 radio(CE_pin, CSN_pin); // CE, CSN
 Mydata data;
 Remote controller_data;
 Servo grip_servo;
-Servo servo1;
-Servo servo2;
-Servo servo3;
+Servo servoA;
+Servo servoB;
+Servo servoC;
 Servo mycam;
 Interpolation interp1; // interpolation objects
 Interpolation interp2;
+Interpolation interp3;
 
 void setup()
 {
   Serial.begin(115200);
+  while ((int)servo1_current != (int)servo1_target)
+  {
+    servo1_current = interp1.go(servo1_target, 1000);
+  }
+  while ((int)servo2_current != (int)servo2_target)
+  {
+    servo2_current = interp2.go(servo2_target, 1000);
+  }
+  while ((int)grip_current != (int)grip_target)
+  {
+    grip_current = interp3.go(grip_target, 1000);
+  }
+  grip_servo.attach(Servo_4);
+  servoA.attach(Servo_1);
+  servoB.attach(Servo_2);
+  servoC.attach(Servo_3);
+  servoA.write(servo1_target);
+  servoB.write(servo2_target);
+  servoC.write(servo3_target);
+  grip_servo.write(grip_target);
+  mycam.attach(camera_swtich);
   RF_setup(address, "Tx");
   pinMode(RA_pin, INPUT);
   pinMode(arm_yaw_switch, INPUT);
@@ -136,25 +166,26 @@ void setup()
   ibusRC_setup(RCibus);
   remote_getdata();
   init_setup();
-  grip_servo.attach(Servo_4);
-  servo1.attach(Servo_1);
-  servo2.attach(Servo_2);
-  servo3.attach(Servo_3);
-  mycam.attach(camera_swtich);
+  Serial.println("STARTO");
+
+  while (true)
+  {
+    loop_1();
+  }
 }
 
-void loop()
+void loop_1()
 {
   current_time = micros();
   current_arm_t = micros();
   if (current_time - pev_time >= offset_time)
   {
-    sensor_update();
-    swtich_camera();
-    Serial_test();
-    nRF_send();
-    Robot_mode();
     ibus_loop();
+    sensor_update();
+    Robot_mode();
+    swtich_camera();
+    nRF_send();
+    Serial_test();
     pev_time = micros();
   }
 }
@@ -309,26 +340,16 @@ void Robot_mode()
     Serial.print(round(target_R));
     Serial.print(" CurrentR:");
     Serial.print(round(current_R));
+
+    robot_arm();
+
   } // end drive mode
   else
   {
     // robot arm mode
-    ik_cal();
-    servo1_target = theta_3 + servo1_offset;
-    servo2_target = servo2_offset - (theta_4 + theta_3);
+    base_rotate();
+    robot_arm();
 
-    servo1_current = interp1.go(servo1_target, 1000);
-    servo2_current = interp2.go(servo2_target, 1000);
-    if (servo1_current != servo1_target)
-    {
-      servo1.write(round(servo1_current));
-    }
-    if (servo2_current != servo2_target)
-    {
-      servo2.write(round(servo2_current));
-    }
-
-    pev_time = micros();
   } // end robot arm mode
 } // end robot mode
 
@@ -352,7 +373,8 @@ void init_setup()
       Serial.println("please set rc_controller button and throttle");
       first_print = false;
     }
-    remote_getdata();
+    ibus_loop();
+    sensor_update();
     nRF_send();
   }
   first_print = true;
@@ -380,12 +402,33 @@ void Serial_test()
   // Serial.print(controller_data.VRA);
   // Serial.print(" VB:");
   // Serial.println(controller_data.VRB);
-
+  Serial.print("Target1:");
+  Serial.print(servo1_target);
+  Serial.print(" Current1:");
+  Serial.print(servo1_current);
+  Serial.print(" Target2:");
+  Serial.print(servo2_target);
+  Serial.print(" Current2:");
+  Serial.print(servo2_current);
+  Serial.print(" x:");
+  Serial.print(x);
+  Serial.print(" y:");
+  Serial.print(y);
+  Serial.print(" theta3:");
+  Serial.print(theta_3);
+  Serial.print(" theta4:");
+  Serial.print(theta_4);
   Serial.print(" Vb:");
-  Serial.println(voltage);
-
+  Serial.print(voltage);
   Serial.print(" SW_YAW:");
-  Serial.println(digitalRead(arm_yaw_switch));
+  Serial.print(digitalRead(arm_yaw_switch));
+  Serial.print(" SERVO3: ");
+  Serial.print(servo3_target);
+  Serial.print(" griptarget:");
+  Serial.print(grip_target);
+  Serial.print(" gripcurrent:");
+  Serial.print(grip_current);
+  Serial.println("");
 }
 
 void swtich_camera()
@@ -402,9 +445,104 @@ void swtich_camera()
   }
 }
 
+void arm_controller()
+{
+  if (current_arm_t - pev_arm_t >= offset_arm_t)
+  {
+    if (isinFreerange(0, freerange))
+    {
+      pev_x = x;
+      x_in = 0;
+    }
+    else
+    {
+      pev_x = x;
+      x_in = float(controller_data.R_X) / 200;
+      x = x + x_in;
+    }
+
+    if (isinFreerange(1, freerange))
+    {
+      pev_y = y;
+      y_in = 0;
+    }
+    else
+    {
+      pev_y = y;
+      y_in = float(controller_data.R_Y) / 200;
+      y = y + y_in;
+    }
+    pev_arm_t = micros();
+  }
+}
+
+void robot_arm()
+{
+  ik_cal();
+  servo1_target = theta_3 + servo1_offset;
+  servo2_target = servo2_offset - (theta_4 + theta_3);
+  servo1_current = interp1.go(servo1_target, 1000);
+  servo2_current = interp2.go(servo2_target, 1000);
+  grip_current = interp3.go(grip_target, 1000);
+  if ((int)servo1_current != (int)servo1_target)
+  {
+    servoA.write(round(servo1_current));
+  }
+  if ((int)servo2_current != (int)servo2_target)
+  {
+    servoB.write(round(servo2_current));
+  }
+  if ((int)grip_current != (int)grip_target)
+  {
+    grip_servo.write(round(grip_current));
+  }
+}
+
 void ik_cal()
 {
-  arm_controller();
+  if (controller_data.SWC == 0)
+  {
+    if (pev_arm_mode != controller_data.SWC)
+    {
+      x = home_pos[0];
+      y = home_pos[1];
+      Serial.println("Mode 0");
+    }
+    grip_target = close_grip;
+    arm_controller();
+    pev_arm_mode = controller_data.SWC;
+  }
+  else if (controller_data.SWC == 1)
+  {
+    grip_target = map(controller_data.VRA, 0, 180, min_grip, max_grip);
+    if ((int)grip_current != (int)grip_target)
+    {
+      grip_target = map(controller_data.VRA, 0, 180, min_grip, max_grip);
+      x = pev_x;
+      y = pev_y;
+    }
+    else if (pev_arm_mode != controller_data.SWC)
+    {
+      Serial.println("Mode 1");
+      x = check_pos[0];
+      y = check_pos[1];
+      Serial.println("DOne");
+      pev_arm_mode = controller_data.SWC;
+    }
+    else
+    {
+      pev_arm_mode = controller_data.SWC;
+      arm_controller();
+    }
+  }
+  else if (controller_data.SWC == 2)
+  {
+    if (pev_arm_mode != controller_data.SWC)
+    {
+      Serial.println("Mode 2");
+    }
+    pev_arm_mode = controller_data.SWC;
+  }
 
   float r1 = sqrt(sq(x) + sq(y));
   float phi_1 = acos((sq(a2) - sq(a1) - sq(r1)) / (-2 * a1 * r1));
@@ -429,33 +567,19 @@ void ik_cal()
   }
 }
 
-void arm_controller()
+void base_rotate()
 {
-  if (current_arm_t - pev_arm_t >= offset_arm_t)
+  if (isinFreerange(3, freerange))
   {
-    if (isinFreerange(2, freerange))
-    {
-      pev_x = x;
-      x_in = 0;
-    }
-    else
-    {
-      pev_x = x;
-      x_in = float(controller_data.L_Y) / 200;
-      x = x + x_in;
-    }
-
-    if (isinFreerange(1, freerange))
-    {
-      pev_y = y;
-      y_in = 0;
-    }
-    else
-    {
-      pev_y = y;
-      y_in = float(controller_data.R_Y) / 200;
-      y = y + y_in;
-    }
-    pev_arm_t = micros();
+    servo3_target = (1500);
   }
+  else if (controller_data.L_X > 0)
+  {
+    servo3_target = (1470 - controller_data.L_X);
+  }
+  else if (controller_data.L_X < 0)
+  {
+    servo3_target = (1500 - controller_data.L_X);
+  }
+  servoC.writeMicroseconds(servo3_target);
 }
