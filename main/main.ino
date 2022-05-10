@@ -46,10 +46,35 @@ float servo3_target = 1500;
 float grip_target = 180, grip_current = 0;
 int min_grip = 120, max_grip = 180, close_grip = 90;
 
+// switch parameter
+boolean first_touch = true;
+int count2 = 0;
+int switch_count = 0;
+int switch_confirm = 50;
+
+// home parameter
+boolean current_yaw_swtich = false;
+boolean home_first_loop = true;
+int home_current_sequean = 0;
+
+// go parameter
+boolean go_first_loop = true;
+boolean triggered = false;
+int go_current_sequean = 0;
+int count_yaw_switch = 0;
+float remeaning_deg = 0;
+float remeaning_time = 0;
+int confirm_go_deg = 0;
+
 // object codinate
 int pev_arm_mode = 0;
+int block_count = 0;
 float check_pos[] = {10.5, 2.2, 0};
 float home_pos[] = {5.5, 3.8, 0};
+float place1_pos[] = {11.5, 9, 200};
+float place2_pos[] = {11.5, 9, 160};
+float place3_pos[] = {8.2, 9, 200};
+float place4_pos[] = {8.2, 9, 160};
 
 // IK robot arm math
 float x = 6, y = 4, pev_x = 6, pev_y = 4;
@@ -59,7 +84,9 @@ float theta_1 = -38, theta_2 = 145, theta_3 = 106, theta_4 = -145;
 
 // time loop
 int current_time = 0, pev_time = 0, offset_time = 5000;
-int current_arm_t = 0, pev_arm_t = 0, offset_arm_t = 100000;
+int pev_arm_t = 0, offset_arm_t = 100000;
+int pev_switch = 0;
+int current_millis = 0, pev_homing = 0, pev_go = 0;
 
 // drive mode 2 setting
 int min_percentage = 25;
@@ -167,7 +194,7 @@ void setup()
   remote_getdata();
   init_setup();
   Serial.println("STARTO");
-
+  home_positon(false);
   while (true)
   {
     loop_1();
@@ -177,10 +204,10 @@ void setup()
 void loop_1()
 {
   current_time = micros();
-  current_arm_t = micros();
+  current_time = micros();
+  current_millis = millis();
   if (current_time - pev_time >= offset_time)
   {
-    ibus_loop();
     sensor_update();
     Robot_mode();
     swtich_camera();
@@ -195,6 +222,10 @@ void sensor_update()
   RA = radioactive_getdata(RA_pin);
   voltage = voltage_getdata(Vb_pin);
   remote_getdata();
+  ibus_loop();
+  switch_runtime();
+  yaw_go(0,true);
+  home_positon(true);
 }
 
 void remote_getdata()
@@ -447,7 +478,7 @@ void swtich_camera()
 
 void arm_controller()
 {
-  if (current_arm_t - pev_arm_t >= offset_arm_t)
+  if (current_time - pev_arm_t >= offset_arm_t)
   {
     if (isinFreerange(0, freerange))
     {
@@ -582,4 +613,184 @@ void base_rotate()
     servo3_target = (1500 - controller_data.L_X);
   }
   servoC.writeMicroseconds(servo3_target);
+}
+
+void yaw_go(int go_deg, boolean runtime)
+{
+  // check current_heading if >180 than turn right else if<180 turn left  else if = 180 turn untill hit switch
+  if (go_first_loop && not(runtime))
+  {
+    Serial.println("Start go sequean");
+    go_first_loop = false;
+    pev_go = millis();
+    confirm_go_deg = go_deg;
+    go_current_sequean++;
+    remeaning_deg = float(go_deg > 180 ? go_deg - 180 : 180 - go_deg);
+    remeaning_time = (remeaning_deg / 50) * 1000; // ms
+  }
+  else if (go_current_sequean == 1)
+  {
+    Serial.println("sequean 1");
+    if (confirm_go_deg > 180)
+    {
+      Serial.println("CW");
+      servo3_target = 1370;
+    }
+    else if (confirm_go_deg < 180)
+    {
+      Serial.println("CCW");
+      servo3_target = 1600;
+    }
+    go_current_sequean++;
+  }
+  else if (go_current_sequean == 2)
+  {
+    Serial.print("sequean 2 ");
+    Serial.println(count_yaw_switch);
+    if (current_yaw_swtich && not(triggered))
+    {
+      count_yaw_switch++;
+      triggered = true;
+    }
+    else if (not(current_yaw_swtich))
+    {
+      triggered = false;
+    }
+
+    if (count_yaw_switch == 2)
+    {
+      servo3_target = 1500;
+      go_current_sequean++;
+      pev_go = millis();
+    }
+  }
+  else if (go_current_sequean == 3)
+  {
+    Serial.print("sequean 3 ");
+    Serial.println(String(remeaning_deg) + " " + String(remeaning_time));
+    if (confirm_go_deg > 180)
+    {
+      servo3_target = 1600;
+    }
+    else if (confirm_go_deg < 180)
+    {
+      servo3_target = 1370;
+    }
+    if (current_millis - pev_go >= remeaning_time)
+    {
+      servo3_target = 1500;
+      go_current_sequean++;
+    }
+  }
+  else if (go_current_sequean == 4)
+  {
+    Serial.println("sequean 4");
+    servo3_target = 1500;
+    go_first_loop = true;
+    go_current_sequean = 0;
+  }
+  servoC.writeMicroseconds(servo3_target);
+}
+
+void home_positon(boolean runtime)
+{
+  // first turn left for 1s; if not touch switch --> turn right for 2s  if touch button stop turn servo
+
+  if (home_first_loop && not(runtime) && current_yaw_swtich)
+  {
+    Serial.println("Start homing sequean");
+    home_first_loop = false;
+    pev_homing = millis();
+    servo3_target = 1600;
+    home_current_sequean = -1;
+  }
+  else if (home_first_loop && not(runtime))
+  {
+    Serial.println("Start homing sequean");
+    home_first_loop = false;
+    pev_homing = millis();
+    home_current_sequean++;
+  }
+  else if (current_yaw_swtich && (home_current_sequean != 0))
+  {
+    servo3_target = 1500;
+    home_current_sequean = 5;
+  }
+  else if (home_current_sequean == -1)
+  {
+    if (current_millis - pev_homing >= 300)
+    {
+      home_current_sequean == 1;
+    }
+    pev_homing = millis();
+  }
+  else if (home_current_sequean == 1)
+  {
+    Serial.println("sequean 1");
+    servo3_target = 1370;
+    home_current_sequean++;
+  }
+  else if (home_current_sequean == 2)
+  {
+    Serial.println("sequean 2");
+    if (current_millis - pev_homing >= 300)
+    {
+      home_current_sequean++;
+    }
+  }
+  else if (home_current_sequean == 3)
+  {
+    Serial.println("sequean 3");
+    servo3_target = 1600;
+    pev_homing = millis();
+    home_current_sequean++;
+  }
+  else if (home_current_sequean == 4)
+  {
+    Serial.println("sequean 4");
+    if (current_millis - pev_homing >= 600)
+    {
+      home_current_sequean++;
+    }
+  }
+  else if (home_current_sequean == 5)
+  {
+    Serial.println("sequean 5");
+    servo3_target = 1500;
+    home_first_loop = true;
+    home_current_sequean = 0;
+  }
+  servoC.writeMicroseconds(servo3_target);
+}
+
+void switch_runtime()
+{
+  if (digitalRead(arm_yaw_switch) == 0 && first_touch)
+  {
+    count2++;
+    Serial.println((float(analogRead(A0)) / 1023) * 20);
+    current_yaw_swtich = true;
+    first_touch = false;
+    pev_switch = millis();
+  }
+  if (current_time - pev_arm_t >= offset_arm_t)
+  {
+    if (digitalRead(arm_yaw_switch) == 1 && not(first_touch) && switch_count == switch_confirm)
+    {
+      first_touch = true;
+      switch_count = 0;
+    }
+    else if (digitalRead(arm_yaw_switch) == 1 && not(first_touch))
+    {
+      switch_count++;
+    }
+    pev_arm_t = micros();
+  }
+  if (current_yaw_swtich)
+  {
+    if (current_millis - pev_switch >= 200)
+    {
+      current_yaw_swtich = false;
+    }
+  }
 }
