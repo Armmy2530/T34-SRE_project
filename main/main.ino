@@ -45,7 +45,7 @@ float servo2_target = 44, servo2_current = 0, servo2_offset = 6;
 float servo3_target = 1500;
 float grip_target = 180, grip_current = 0;
 int min_grip = 120, max_grip = 180, close_grip = 90;
-int max_cw = 1370, max_ccw = 1600, stop = 1500;
+int max_cw = 1300, max_ccw = 1680, stop = 1500;
 float heading_target = 0, heading_current = -1;
 
 // switch parameter
@@ -70,27 +70,30 @@ int store_current_sequean = 0;
 boolean get_first_loop = true;
 int get_current_sequean = 0;
 
-boolean triggered = false,trigger_manula = true;
+boolean triggered = false, trigger_manula = true;
 float remeaning_deg = 0;
 float remeaning_time = 0;
 int count_yaw_switch = 0;
 int confirm_go_deg = 0;
 
 // object codinate
+float x_min = 2, x_max = 24;
+float y_min = -5, y_max = 20;
 int pev_arm_mode = 0;
 int block_count = 0;
 float check_pos[] = {10.5, 2.2, 0};
 float home_pos[] = {5.5, 3.8, 0};
 float place1_pos[] = {12.9, 10.5, 200};
 float place2_pos[] = {12.9, 10.5, 165};
-float place3_pos[] = {7.7, 11, 200};
-float place4_pos[] = {7.7, 11, 165};
+float place3_pos[] = {7.4, 10.5, 200};
+float place4_pos[] = {7.4, 10.5, 165};
 
 // IK robot arm math
 float x = 6, y = 4, pev_x = 6, pev_y = 4;
 float x_in = 6, y_in = 4;
 float a1 = 12, a2 = 12;
 float theta_1 = -38, theta_2 = 145, theta_3 = 106, theta_4 = -145;
+boolean arm_controller_status = false;
 
 // STORE parameter
 float x_store = 0, y_store = 0, yaw_store = 0;
@@ -101,7 +104,7 @@ int current_millis = 0, current_time = 0;
 int pev_time = 0, offset_time = 500;
 int pev_arm_t = 0, offset_arm_t = 100000;
 int pev_switch = 0;
-int pev_homing = 0, pev_go = 0, pev_return = 0, pev_store = 0, pev_get = 0;
+int pev_homing = 0, pev_go = 0, pev_return = 0, pev_store = 0, pev_get = 0, pev_check = 0;
 
 // drive mode 2 setting
 int min_percentage = 25;
@@ -109,6 +112,7 @@ int max_percentage = 125;
 
 boolean first_print = true;
 boolean first_cam = true;
+boolean first_check = true;
 float freerange = 7; // percentage freerange
 
 const uint64_t address = 0xF0F0F0F0E1LL;
@@ -494,6 +498,7 @@ void swtich_camera()
 
 void arm_controller()
 {
+  arm_controller_status = true;
   if (current_time - pev_arm_t >= offset_arm_t)
   {
     if (isinFreerange(0, freerange))
@@ -504,7 +509,7 @@ void arm_controller()
     else
     {
       pev_x = x;
-      x_in = float(controller_data.R_X) / 200;
+      x_in = float(controller_data.R_X) / 1000;
       x = x + x_in;
     }
 
@@ -516,7 +521,7 @@ void arm_controller()
     else
     {
       pev_y = y;
-      y_in = float(controller_data.R_Y) / 200;
+      y_in = float(controller_data.R_Y) / 1000;
       y = y + y_in;
     }
     pev_arm_t = micros();
@@ -526,23 +531,43 @@ void arm_controller()
 void robot_arm()
 {
   ik_cal();
-  servo1_target = theta_3 + servo1_offset;
-  servo2_target = servo2_offset - (theta_4 + theta_3);
-  servo1_current = interp1.go(servo1_target, 1000);
-  servo2_current = interp2.go(servo2_target, 1000);
-  grip_current = interp3.go(grip_target, 1000);
-  if ((int)servo1_current != (int)servo1_target)
+  if (arm_controller_status == true)
   {
+    servo1_target = theta_3 + servo1_offset;
+    servo2_target = servo2_offset - (theta_4 + theta_3);
+    servo1_current = servo1_target;
+    servo2_current = servo2_target;
+    interp1.go(servo1_target, 1000);
+    interp2.go(servo2_target, 1000);
+    grip_current = interp3.go(grip_target, 1000);
     servoA.write(round(servo1_current));
-  }
-  if ((int)servo2_current != (int)servo2_target)
-  {
     servoB.write(round(servo2_current));
+    if ((int)grip_current != (int)grip_target)
+    {
+      grip_servo.write(round(grip_current));
+    }
   }
-  if ((int)grip_current != (int)grip_target)
+  else
   {
-    grip_servo.write(round(grip_current));
+    servo1_target = theta_3 + servo1_offset;
+    servo2_target = servo2_offset - (theta_4 + theta_3);
+    servo1_current = interp1.go(servo1_target, 1000);
+    servo2_current = interp2.go(servo2_target, 1000);
+    grip_current = interp3.go(grip_target, 1000);
+    if ((int)servo1_current != (int)servo1_target)
+    {
+      servoA.write(round(servo1_current));
+    }
+    if ((int)servo2_current != (int)servo2_target)
+    {
+      servoB.write(round(servo2_current));
+    }
+    if ((int)grip_current != (int)grip_target)
+    {
+      grip_servo.write(round(grip_current));
+    }
   }
+  arm_controller_status = false;
 }
 
 void ik_cal()
@@ -553,10 +578,14 @@ void ik_cal()
     {
       x = home_pos[0];
       y = home_pos[1];
+      pev_check = millis();
       Serial.println("Mode 0");
     }
     grip_target = close_grip;
-    arm_controller();
+    if (current_millis - pev_check >= 1200)
+    {
+      arm_controller();
+    }
     pev_arm_mode = controller_data.SWC;
   }
   else if (controller_data.SWC == 1)
@@ -574,11 +603,15 @@ void ik_cal()
       x = check_pos[0];
       y = check_pos[1];
       Serial.println("DOne");
+      pev_check = millis();
       pev_arm_mode = controller_data.SWC;
     }
     else if (pev_arm_mode == 1)
     {
-      arm_controller();
+      if (current_millis - pev_check >= 1200)
+      {
+        arm_controller();
+      }
     }
   }
   else if (controller_data.SWC == 2)
@@ -629,10 +662,14 @@ void ik_cal()
         block_count++;
       }
       pev_arm_mode = controller_data.SWC;
+      pev_check = millis();
     }
     else
     {
-      arm_controller();
+      if (current_millis - pev_check >= 10000)
+      {
+        arm_controller();
+      }
     }
   }
 
@@ -641,6 +678,23 @@ void ik_cal()
     base_rotate();
   }
 
+  if (x > x_max)
+  {
+    x = x_max;
+  }
+  else if (x < x_min)
+  {
+    x = x_min;
+  }
+
+  if (y > y_max)
+  {
+    y = y_max;
+  }
+  else if (y < y_min)
+  {
+    y = y_min;
+  }
   float r1 = sqrt(sq(x) + sq(y));
   float phi_1 = acos((sq(a2) - sq(a1) - sq(r1)) / (-2 * a1 * r1));
   float phi_2 = atan(y / x);
@@ -668,15 +722,15 @@ void base_rotate()
 {
   if (isinFreerange(3, freerange))
   {
-    servo3_target = (1500);
+    servo3_target = (stop);
   }
   else if (controller_data.L_X > 0)
   {
-    servo3_target = (1470 - controller_data.L_X);
+    servo3_target = (max_cw - controller_data.L_X);
   }
   else if (controller_data.L_X < 0)
   {
-    servo3_target = (1500 - controller_data.L_X);
+    servo3_target = (max_ccw - controller_data.L_X);
   }
 }
 
@@ -708,6 +762,15 @@ void yaw_return(boolean runtime)
   else if (return_current_sequean == 2)
   {
     Serial.print("return sequean 2 ");
+    if (current_millis - pev_return >= 500)
+    {
+      return_current_sequean++;
+      pev_return = millis();
+    }
+  }
+  else if (return_current_sequean == 3)
+  {
+    Serial.print("return sequean 3 ");
     Serial.println(count_yaw_switch);
     if (current_yaw_swtich && not(triggered))
     {
@@ -719,16 +782,16 @@ void yaw_return(boolean runtime)
       triggered = false;
     }
 
-    if (count_yaw_switch == 2)
+    if (count_yaw_switch == 1)
     {
       servo3_target = stop;
       return_current_sequean++;
       pev_return = millis();
     }
   }
-  else if (return_current_sequean == 3)
+  else if (return_current_sequean == 4)
   {
-    Serial.println("return sequean 3");
+    Serial.println("return sequean 4");
     servo3_target = stop;
     return_first_loop = true;
     return_current_sequean = 0;
@@ -772,6 +835,7 @@ void yaw_go(int go_deg, boolean runtime)
     if (current_millis - pev_go >= 500)
     {
       go_current_sequean++;
+      pev_go = millis();
     }
   }
   else if (go_current_sequean == 3)
@@ -782,17 +846,30 @@ void yaw_go(int go_deg, boolean runtime)
     {
       count_yaw_switch++;
       triggered = true;
+      pev_go = millis();
     }
     else if (not(current_yaw_swtich))
     {
       triggered = false;
     }
 
-    if (count_yaw_switch == 2)
+    if (count_yaw_switch == 1)
     {
-      servo3_target = stop;
-      go_current_sequean++;
-      pev_go = millis();
+      if (confirm_go_deg < 180)
+      {
+        if (current_millis - pev_go >= 50)
+        {
+          servo3_target = stop;
+          go_current_sequean++;
+          pev_go = millis();
+        }
+      }
+      else
+      {
+        servo3_target = stop;
+        go_current_sequean++;
+        pev_go = millis();
+      }
     }
   }
   else if (go_current_sequean == 4)
@@ -807,26 +884,7 @@ void yaw_go(int go_deg, boolean runtime)
   }
   else if (go_current_sequean == 5)
   {
-    Serial.print("go sequean 5 ");
-    Serial.println(String(remeaning_deg) + " " + String(remeaning_time));
-    if (confirm_go_deg > 180)
-    {
-      servo3_target = max_ccw;
-    }
-    else if (confirm_go_deg < 180)
-    {
-      servo3_target = max_cw;
-    }
-    if (current_millis - pev_go >= remeaning_time)
-    {
-      servo3_target = stop;
-      go_current_sequean++;
-      pev_go = millis();
-    }
-  }
-  else if (go_current_sequean == 6)
-  {
-    Serial.println("go sequean 6");
+    Serial.println("go sequean 5");
     servo3_target = stop;
     go_first_loop = true;
     go_current_sequean = 0;
@@ -844,7 +902,7 @@ void home_positon(boolean runtime)
     Serial.println("Start homing sequean");
     home_first_loop = false;
     pev_homing = millis();
-    servo3_target = max_ccw - 40;
+    servo3_target = max_ccw;
     home_current_sequean = -1;
   }
   else if (home_first_loop && not(runtime))
@@ -861,7 +919,7 @@ void home_positon(boolean runtime)
   }
   else if (home_current_sequean == -1)
   {
-    if (current_millis - pev_homing >= 200)
+    if (current_millis - pev_homing >= 100)
     {
       home_current_sequean = 1;
     }
@@ -870,14 +928,14 @@ void home_positon(boolean runtime)
   else if (home_current_sequean == 1)
   {
     Serial.println("homing sequean 1");
-    servo3_target = max_cw + 40;
+    servo3_target = max_cw;
     home_current_sequean++;
     pev_homing = millis();
   }
   else if (home_current_sequean == 2)
   {
     Serial.println("homing sequean 2");
-    if (current_millis - pev_homing >= 400)
+    if (current_millis - pev_homing >= 600)
     {
       home_current_sequean++;
     }
@@ -900,14 +958,14 @@ void home_positon(boolean runtime)
   else if (home_current_sequean == 5)
   {
     Serial.println("homing sequean 5");
-    servo3_target = max_ccw - 40;
+    servo3_target = max_ccw;
     pev_homing = millis();
     home_current_sequean++;
   }
   else if (home_current_sequean == 6)
   {
     Serial.println("homing sequean 6");
-    if (current_millis - pev_homing >= 800)
+    if (current_millis - pev_homing >= 1200)
     {
       home_current_sequean++;
     }
@@ -959,7 +1017,7 @@ void get_sequen(float x_sq, float y_sq, int go_sq)
   y_get = y_sq;
   yaw_get = go_sq;
   get_current_sequean = 1;
-  trigger_manula=false;
+  trigger_manula = false;
 }
 void get_runtime()
 {
@@ -1056,7 +1114,7 @@ void get_runtime()
 
 void store_sequen(float x_sq, float y_sq, int go_sq)
 {
-  x_store = x_sq+1;
+  x_store = x_sq + 1;
   y_store = y_sq;
   yaw_store = go_sq;
   store_current_sequean = 1;
