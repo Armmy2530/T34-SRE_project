@@ -72,14 +72,17 @@ boolean pev_swd = false;
 boolean get_first_loop = true;
 int get_current_sequean = 0;
 
+// mode parameter
 boolean triggered = false, trigger_manula = true;
 float remeaning_deg = 0;
 float remeaning_time = 0;
 int count_yaw_switch = 0;
 int confirm_go_deg = 0;
+boolean auto_enable = false;
+int auto_mid = 90;
 
 // object codinate
-float x_min = 2, x_max = 24;
+float x_min = 2 , x_max = 24;
 float y_min = -5, y_max = 20;
 int pev_arm_mode = 0;
 int block_count = 0;
@@ -486,6 +489,8 @@ void Serial_test()
   Serial.print(grip_current);
   Serial.print(" Block:");
   Serial.print(block_count);
+  Serial.print(" drive_enable");
+  Serial.print(drive_enable);
 
   Serial.println("");
 }
@@ -1000,6 +1005,10 @@ void home_positon(boolean runtime)
   }
 }
 
+boolean auto_mode_check()
+{
+  return (controller_data.VRB >= auto_mid) ? true : false;
+}
 void switch_runtime()
 {
   if (digitalRead(arm_yaw_switch) == 0 && first_touch)
@@ -1038,6 +1047,7 @@ void get_sequen(float x_sq, float y_sq, int go_sq)
   get_current_sequean = 1;
   trigger_manula = false;
 }
+
 void get_runtime()
 {
   if (get_current_sequean == 0)
@@ -1138,7 +1148,10 @@ void store_sequen(float x_sq, float y_sq, int go_sq)
   yaw_store = go_sq;
   store_current_sequean = 1;
   trigger_manula = false;
+  drive_enable = false;
+  pev_swd = controller_data.SWD;
 }
+
 void store_runtime()
 {
   if (store_current_sequean == 0)
@@ -1146,10 +1159,22 @@ void store_runtime()
   }
   else if (store_current_sequean == 1)
   {
-    yaw_go(yaw_store, false);
     x = x_store;
     y = y_store + 2;
-    store_current_sequean++;
+    if (auto_mode_check())
+    {
+      yaw_go(yaw_store, false);
+      store_current_sequean++;
+    }
+    else
+    {
+      if (pev_swd != controller_data.SWD)
+      {
+        heading_current = yaw_store;
+        store_current_sequean++;
+      }
+      base_rotate();
+    }
   }
   else if (store_current_sequean == 2)
   {
@@ -1173,7 +1198,6 @@ void store_runtime()
     if (pev_swd != controller_data.SWD)
     {
       store_current_sequean++;
-      drive_enable = true;
     }
     base_rotate();
     drive_enable = false;
@@ -1202,19 +1226,31 @@ void store_runtime()
     if (current_millis - pev_store >= 1500)
     {
       store_current_sequean++;
+      pev_swd = controller_data.SWD;
     }
   }
   else if (store_current_sequean == 9)
   {
-    yaw_return(false);
-    store_current_sequean++;
+    if (auto_mode_check())
+    {
+      yaw_return(false);
+      store_current_sequean++;
+    }
+    else
+    {
+      if (pev_swd != controller_data.SWD)
+      {
+        heading_current = 0;
+        store_current_sequean++;
+      }
+      base_rotate();
+    }
   }
   else if (store_current_sequean == 10)
   {
     if (heading_current == 0)
     {
       store_current_sequean++;
-      home_positon(false);
       pev_store = millis();
     }
   }
@@ -1222,7 +1258,7 @@ void store_runtime()
   {
     if (current_millis - pev_store >= 1000)
     {
-      home_positon(false);
+      drive_enable = true;
       trigger_manula = true;
       store_current_sequean = 0;
     }
