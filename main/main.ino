@@ -42,7 +42,7 @@ boolean drive_enable = true;
 
 // parameter servo
 float servo1_target = 160, servo1_current = 0, servo1_offset = 54;
-float servo2_target = 44, servo2_current = 0, servo2_offset = 6;
+float servo2_target = 44, servo2_current = 0, servo2_offset = 24;
 float servo3_target = 1500;
 float grip_target = 180, grip_current = 0;
 int min_grip = 120, max_grip = 180, close_grip = 90;
@@ -82,7 +82,7 @@ boolean auto_enable = false;
 int auto_mid = 90;
 
 // object codinate
-float x_min = 2 , x_max = 24;
+float x_min = 2, x_max = 24;
 float y_min = -5, y_max = 20;
 int pev_arm_mode = 0;
 int block_count = 0;
@@ -1041,11 +1041,14 @@ void switch_runtime()
 
 void get_sequen(float x_sq, float y_sq, int go_sq)
 {
+  stop_motor();
   x_get = x_sq;
   y_get = y_sq;
   yaw_get = go_sq;
   get_current_sequean = 1;
+  pev_swd = controller_data.SWD;
   trigger_manula = false;
+  drive_enable = false;
 }
 
 void get_runtime()
@@ -1055,11 +1058,23 @@ void get_runtime()
   }
   else if (get_current_sequean == 1)
   {
-    yaw_go(yaw_get, false);
     x = x_get;
     y = y_get;
     grip_target = close_grip;
-    get_current_sequean++;
+    if (auto_mode_check())
+    {
+      yaw_go(yaw_get, false);
+      get_current_sequean++;
+    }
+    else
+    {
+      if (pev_swd != controller_data.SWD)
+      {
+        heading_current = yaw_get;
+        get_current_sequean++;
+      }
+      base_rotate();
+    }
   }
   else if (get_current_sequean == 2)
   {
@@ -1114,19 +1129,31 @@ void get_runtime()
     if (current_millis - pev_get >= 1500)
     {
       get_current_sequean++;
+      pev_swd = controller_data.SWD;
     }
   }
   else if (get_current_sequean == 10)
   {
-    yaw_return(false);
-    get_current_sequean++;
+    if (auto_mode_check())
+    {
+      yaw_return(false);
+      get_current_sequean++;
+    }
+    else
+    {
+      if (pev_swd != controller_data.SWD)
+      {
+        heading_current = 0;
+        get_current_sequean++;
+      }
+      base_rotate();
+    }
   }
   else if (get_current_sequean == 11)
   {
     if (heading_current == 0)
     {
       get_current_sequean++;
-      home_positon(false);
       pev_get = millis();
     }
   }
@@ -1134,15 +1161,35 @@ void get_runtime()
   {
     if (current_millis - pev_get >= 1000)
     {
-      home_positon(false);
-      get_current_sequean = 0;
-      trigger_manula = true;
+      get_current_sequean++;
+      drive_enable = true;
+      pev_swd = controller_data.SWD;
     }
   }
+  else if (get_current_sequean == 13)
+  {
+    if (auto_mode_check())
+    {
+      yaw_return(false);
+      get_current_sequean++;
+    }
+    else
+    {
+      if (pev_swd != controller_data.SWD)
+      {
+        get_current_sequean = 0;
+        trigger_manula = true;
+        grip_target = close_grip;
+      }
+      base_rotate();
+    }
+  }
+  
 }
 
 void store_sequen(float x_sq, float y_sq, int go_sq)
 {
+  stop_motor();
   x_store = x_sq;
   y_store = y_sq;
   yaw_store = go_sq;
@@ -1264,3 +1311,8 @@ void store_runtime()
     }
   }
 }
+
+void stop_motor(){
+  M_L.setSpeed(0);
+  M_R.setSpeed(0);
+  }
